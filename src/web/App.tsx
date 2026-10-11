@@ -1,6 +1,7 @@
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { useEffect, useState } from "preact/hooks";
-import type { MeResponse } from "../shared/types";
+import type { MeResponse, PublicConfig } from "../shared/types";
+import { ApplyForm } from "./ApplyForm";
 import { UnauthorizedError, fetchConfig, fetchMe } from "./api";
 import { getSupabase } from "./supabase";
 
@@ -13,7 +14,7 @@ type View =
 function accountMessage(me: MeResponse): string {
   switch (me.state) {
     case "none":
-      return "You have not applied yet. The application form arrives in the next update.";
+      return "Apply for access below. An admin reviews every application.";
     case "pending":
       return "Your application is pending. An admin will review it.";
     case "rejected":
@@ -30,40 +31,51 @@ function accountMessage(me: MeResponse): string {
 export function App() {
   const [view, setView] = useState<View>({ kind: "loading" });
   const [client, setClient] = useState<SupabaseClient | null>(null);
-  const [appName, setAppName] = useState("Nook");
+  const [config, setConfig] = useState<PublicConfig | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Looks up the account state for a session and shows it.
+  async function showSession(session: Session | null) {
+    if (!session) {
+      setView({ kind: "signed-out" });
+      return;
+    }
+    try {
+      const me = await fetchMe(session.access_token);
+      setView({ kind: "signed-in", me });
+    } catch (err) {
+      setView({
+        kind: "error",
+        message:
+          err instanceof UnauthorizedError
+            ? "Your sign-in was not accepted. Sign out and try again."
+            : "Could not load your account. Try again shortly.",
+      });
+    }
+  }
+
+  async function getAccessToken(): Promise<string | null> {
+    if (!client) return null;
+    const { data } = await client.auth.getSession();
+    return data.session?.access_token ?? null;
+  }
+
+  async function reload() {
+    if (!client) return;
+    const { data } = await client.auth.getSession();
+    await showSession(data.session);
+  }
 
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
 
-    async function showSession(session: Session | null) {
-      if (cancelled) return;
-      if (!session) {
-        setView({ kind: "signed-out" });
-        return;
-      }
-      try {
-        const me = await fetchMe(session.access_token);
-        if (!cancelled) setView({ kind: "signed-in", me });
-      } catch (err) {
-        if (cancelled) return;
-        setView({
-          kind: "error",
-          message:
-            err instanceof UnauthorizedError
-              ? "Your sign-in was not accepted. Sign out and try again."
-              : "Could not load your account. Try again shortly.",
-        });
-      }
-    }
-
     async function start() {
       try {
-        const config = await fetchConfig();
+        const loaded = await fetchConfig();
         if (cancelled) return;
-        setAppName(config.appName);
-        const supabase = getSupabase(config);
+        setConfig(loaded);
+        const supabase = getSupabase(loaded);
         setClient(supabase);
 
         const { data } = await supabase.auth.getSession();
@@ -106,7 +118,7 @@ export function App() {
 
   return (
     <main>
-      <h1>{appName}</h1>
+      <h1>{config?.appName ?? "Nook"}</h1>
       {view.kind === "loading" && <p>Loading…</p>}
       {view.kind === "error" && (
         <>
@@ -123,6 +135,14 @@ export function App() {
       {view.kind === "signed-in" && (
         <>
           <p>{accountMessage(view.me)}</p>
+          {view.me.state === "none" && config && (
+            <ApplyForm
+              siteKey={config.turnstileSiteKey}
+              getAccessToken={getAccessToken}
+              onSubmitted={(me) => setView({ kind: "signed-in", me })}
+              onAlreadyApplied={() => void reload()}
+            />
+          )}
           <button onClick={signOut}>Sign out</button>
         </>
       )}

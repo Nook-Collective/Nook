@@ -6,8 +6,8 @@ Runs on Cloudflare's free tier. Sign-in is handled by Supabase Auth (GitHub).
 ## Status
 
 - [x] Milestone 0: project scaffold
-- [x] Milestone 1a: GitHub sign-in, token verification, account state, first admin (this update)
-- [ ] Milestone 1b: application form with bot protection, pending page
+- [x] Milestone 1a: GitHub sign-in, token verification, account state, first admin
+- [x] Milestone 1b: application form with Turnstile bot protection, pending page (this update)
 - [ ] Milestone 2: admin review dashboard
 - [ ] Milestone 3: channels and message history
 - [ ] Milestone 4: real-time chat over WebSockets
@@ -16,7 +16,7 @@ Runs on Cloudflare's free tier. Sign-in is handled by Supabase Auth (GitHub).
 
 Nothing in this repo deploys anything. There is deliberately no `deploy` script yet.
 
-## How sign-in works
+## How sign-in and applying work
 
 1. The browser signs in through Supabase with GitHub and receives an access token.
 2. Every API call sends that token. The Worker checks its signature against
@@ -24,38 +24,49 @@ Nothing in this repo deploys anything. There is deliberately no `deploy` script 
 3. Supabase only proves WHO someone is. What they may DO comes from the
    `members` table in our own database, checked on every protected request.
    A signed-in person with no row has not applied ("none").
+4. To apply, a person enters a name and an optional note and passes a Turnstile check.
+   The Worker validates the input, verifies the Turnstile token with Cloudflare
+   (the widget alone proves nothing), and only then adds a `pending` row.
+5. Applications stop when `MAX_PENDING_APPLICATIONS` are waiting for review.
 
-## One-time setup outside this repo (you do these in your own accounts)
+What we collect: a name and a note, both typed by the applicant and NOT verified.
+An admin must not treat them as proof of identity. (Supabase's own `user_metadata`
+is editable by the user, so we do not use it for anything.)
 
-1. **GitHub OAuth App.** GitHub -> Settings -> Developer settings -> OAuth Apps -> New.
-   Homepage URL: your dev address. Authorization callback URL: the callback shown in
-   Supabase under the GitHub provider (looks like `https://<project-ref>.supabase.co/auth/v1/callback`).
-   Create a client secret. Paste both values into Supabase only; never into this repo or a chat.
-2. **Supabase -> Authentication -> Sign In / Providers.** Enable GitHub with that client ID and secret.
-   Turn OFF the Email provider and leave anonymous sign-ins off, so GitHub is the only way in.
-3. **Supabase -> Authentication -> URL Configuration.** Add your dev address (for Codespaces,
-   the forwarded URL for port 5173 shown in the Ports tab) to the Redirect URLs list.
-   Unlisted addresses are blocked and fall back to the Site URL.
-4. **Keys.** Copy the project URL and the publishable key into `.dev.vars` (see below).
-   Use the publishable key only.
-5. **Check token keys.** Open `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`
-   in a browser. It should show a non-empty `keys` list. If it shows `{"keys":[]}`, tell me.
+## Setup outside this repo (your own accounts)
+
+See Milestone 1a notes: GitHub OAuth App, Supabase GitHub provider (Email provider off),
+Supabase redirect URL for your dev address, project URL and publishable key in `.dev.vars`.
+
+Turnstile: local development uses Cloudflare's published TEST keys (already in
+`.dev.vars.example`). They always pass and need no widget or hostname setup.
+Real keys come from Cloudflare dashboard -> Turnstile -> Add widget, and are needed only
+when deploying (with your approval). The real secret key is set with `wrangler secret put`.
 
 ## Local setup
 
 ```
 npm install jose @supabase/supabase-js
-cp .dev.vars.example .dev.vars        # then edit .dev.vars with your two values
+cp .dev.vars.example .dev.vars        # first time only; then edit your two Supabase values
 npm run cf-typegen
-npm run db:migrate:local              # answer y when asked
+npm run db:migrate:local              # applies any new migrations
 npm test
 npm run typecheck
 npm run dev
 ```
 
+If you already have a `.dev.vars`, add the two TURNSTILE lines from `.dev.vars.example` to it,
+then restart `npm run dev`.
+
+## Check the database by hand
+
+```
+npx wrangler d1 execute DB --local --command "SELECT user_id, status, role, display_name, note FROM members"
+```
+
 ## Create the first admin (local database)
 
-1. Open the app and sign in with GitHub. You should see "You have not applied yet."
+1. Sign in with GitHub in the app.
 2. In Supabase -> Authentication -> Users, copy your user's ID (a UUID).
 3. Run (replace the placeholder; keep the quotes):
 
@@ -63,21 +74,20 @@ npm run dev
    npx wrangler d1 execute DB --local --command "INSERT INTO members (user_id, status, role) VALUES ('PASTE-USER-ID-HERE', 'approved', 'admin') ON CONFLICT(user_id) DO UPDATE SET status = 'approved', role = 'admin', updated_at = CAST(strftime('%s', 'now') AS INTEGER)"
    ```
 
-4. Reload the app. It should say you are approved as an admin.
-
-Why this is safe: it needs access to your own machine (or later, your Cloudflare account).
-There is no public endpoint that can create an admin. `--local` keeps it on this machine's
-database; the same command with `--remote` is only for deployment, with your approval.
+If you already applied through the form, this changes that same row to approved admin.
+There is no public endpoint that can create an admin.
 
 ## Layout
 
-- `src/worker/`  API. `app.ts` routes, `auth.ts` verifies tokens, `members.ts` reads the database.
+- `src/worker/`  API. `app.ts` routes, `auth.ts` verifies tokens, `turnstile.ts` checks bot tokens,
+  `validate.ts` checks applicant input, `members.ts` is the only code that touches the database.
 - `src/web/`     Preact frontend.
-- `src/shared/`  Types used by both.
+- `src/shared/`  Types and limits used by both.
 - `migrations/`  Database migrations (applied in order, never edited after they ship).
 - `test/`        Tests. Tokens are signed with throwaway keys, so no network or secrets.
 
 ## Secrets
 
 Never commit secrets. Local values live in `.dev.vars` (git-ignored); `.dev.vars.example`
-lists names only. The Supabase secret and service_role keys are never used by this project.
+lists names only (the Turnstile values in it are Cloudflare's public test keys).
+The Supabase secret and service_role keys are never used by this project.

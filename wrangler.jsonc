@@ -19,7 +19,11 @@
     }
   ],
   "vars": {
-    "APP_NAME": "Nook"
-    // SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY come from .dev.vars locally.
+    "APP_NAME": "Nook",
+    // Applications are refused once this many are waiting for review.
+    // It is a string because Wrangler variables are text.
+    "MAX_PENDING_APPLICATIONS": "50"
+    // SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, TURNSTILE_SITE_KEY and
+    // TURNSTILE_SECRET_KEY come from .dev.vars locally.
   }
 }

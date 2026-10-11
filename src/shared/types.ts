@@ -21,9 +21,16 @@ export interface PublicConfig {
   appName: string;
   supabaseUrl: string;
   supabasePublishableKey: string;
+  turnstileSiteKey: string;
 }
 
 export interface MeResponse {
   state: AccountState;
   role: MemberRole | null;
+}
+
+export interface ApplyRequest {
+  displayName: string;
+  note: string;
+  turnstileToken: string;
 }

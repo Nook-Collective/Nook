@@ -43,28 +43,49 @@ export async function makeSigner(): Promise<TestSigner> {
   return { keys, sign };
 }
 
-interface FakeRow {
+export interface FakeRow {
   status: string;
   role: string;
+  displayName?: string;
+  note?: string;
 }
 
-// A tiny stand-in for D1 that supports only the one query the Worker runs.
-// It records the bound values so tests can check they were parameters.
-export function fakeDb(rows: Record<string, FakeRow>, calls: unknown[][] = []): D1Database {
-  return {
-    prepare(_sql: string) {
+// A tiny stand-in for D1 that understands only the queries the Worker runs.
+// It copies the SQL's rules in plain code, so these tests check the Worker's
+// logic. The SQL itself is checked against a real database by hand (see README).
+export function createFakeDb(initial: Record<string, FakeRow> = {}, calls: unknown[][] = []) {
+  const rows = new Map<string, FakeRow>(Object.entries(initial));
+  // `calls` collects every set of bound values, in order.
+
+  const db = {
+    prepare(sql: string) {
       return {
         bind(...values: unknown[]) {
           calls.push(values);
           return {
             async first() {
-              return rows[String(values[0])] ?? null;
+              if (!sql.includes("SELECT status, role")) throw new Error(`unexpected query: ${sql}`);
+              return rows.get(String(values[0])) ?? null;
+            },
+            async run() {
+              if (!sql.includes("INSERT INTO members")) throw new Error(`unexpected query: ${sql}`);
+              const [userId, displayName, note, maxPending] = values as [string, string, string, number];
+              const pending = [...rows.values()].filter((r) => r.status === "pending").length;
+              if (rows.has(userId) || pending >= maxPending) return { meta: { changes: 0 } };
+              rows.set(userId, { status: "pending", role: "member", displayName, note });
+              return { meta: { changes: 1 } };
             },
           };
         },
       };
     },
   } as unknown as D1Database;
+
+  return { db, rows, calls };
+}
+
+export function fakeDb(initial: Record<string, FakeRow> = {}, calls: unknown[][] = []): D1Database {
+  return createFakeDb(initial, calls).db;
 }
 
 export function brokenDb(): D1Database {
@@ -78,8 +99,11 @@ export function brokenDb(): D1Database {
 export function makeEnv(db: D1Database, overrides: Partial<Env> = {}): Env {
   return {
     APP_NAME: "Test App",
+    MAX_PENDING_APPLICATIONS: "50",
     SUPABASE_URL,
     SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
+    TURNSTILE_SITE_KEY: "test-site-key",
+    TURNSTILE_SECRET_KEY: "test-secret-key",
     DB: db,
     ...overrides,
   };
