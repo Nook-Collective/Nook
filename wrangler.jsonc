@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "nook",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-10",
+  "assets": {
+    // Unknown paths serve index.html so the single-page app can handle them.
+    "not_found_handling": "single-page-application",
+    // Requests to /api/* always run our Worker code first.
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "nook-db",
+      "migrations_dir": "migrations"
+      // No database_id on purpose: local development does not need one.
+      // We add the real database at deploy time, only with your approval.
+    }
+  ],
+  "vars": {
+    "APP_NAME": "Nook"
+    // SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY come from .dev.vars locally.
+  }
+}

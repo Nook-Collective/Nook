@@ -1,0 +1,27 @@
+{
+  "name": "community-chat",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "npm run build && vite preview",
+    "test": "vitest run",
+    "cf-typegen": "wrangler types",
+    "typecheck": "npm run cf-typegen && tsc -p src/web --noEmit && tsc -p src/worker --noEmit && tsc -p test --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.3",
+    "jose": "^6.2.12",
+    "preact": "^11.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.63.1",
+    "@preact/preset-vite": "^2.10.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.149.0"
+  }
+}
